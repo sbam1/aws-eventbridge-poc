@@ -19,7 +19,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1  # Or your preferred region
+          aws-region: us-east-1
 
       - name: Deploy CloudFormation Stack
         run: |
@@ -29,6 +29,7 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM
 
       - name: Send Test Event to EventBridge
+        if: success()
         run: |
           echo '[
             {
@@ -39,3 +40,11 @@ jobs:
             }
           ]' > test-event.json
           aws events put-events --entries file://test-event.json
+
+      - name: Debug Stack Events on Failure
+        if: failure()
+        run: |
+          echo "CloudFormation stack creation failed. Fetching error events..."
+          aws cloudformation describe-stack-events \
+            --stack-name eventbridge-mvp-stack \
+            --region us-east-1
