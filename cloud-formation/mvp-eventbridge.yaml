@@ -39,7 +39,7 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         ZipFile: |
-          exports.handler = async (event) => {
+          export const handler = async (event) => {
             event.detail.modified = true;
             event.detail.timestamp = new Date().toISOString();
             return event;
@@ -54,18 +54,21 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         ZipFile: |
-          const AWS = require('aws-sdk');
-          const eb = new AWS.EventBridge();
-          exports.handler = async (event) => {
-            await eb.putEvents({
+          import { EventBridgeClient, PutEventsCommand } from "@aws-sdk/client-eventbridge";
+
+          const client = new EventBridgeClient({});
+
+          export const handler = async (event) => {
+            const command = new PutEventsCommand({
               Entries: [{
                 Source: "modified.message",
                 DetailType: "modified",
                 Detail: JSON.stringify(event.detail),
                 EventBusName: "event-bus"
               }]
-            }).promise();
-            return { status: 'sent' };
+            });
+            await client.send(command);
+            return { status: "sent" };
           };
 
   StepFunctionRole:
@@ -122,7 +125,7 @@ Resources:
           - Effect: Allow
             Principal:
               Service: events.amazonaws.com
-            Action: sts:AssumeRole  # ✅ this was missing before
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: StartStepFunctionPolicy
           PolicyDocument:
