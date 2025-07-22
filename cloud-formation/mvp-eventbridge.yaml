@@ -8,6 +8,28 @@ Resources:
     Properties:
       Name: event-bus
 
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lambda-eventbridge-mvp-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MVPExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                  - events:PutEvents
+                Resource: "*"
+
   EventValidatorFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -45,28 +67,6 @@ Resources:
             }).promise();
             return { status: 'sent' };
           };
-
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: lambda-eventbridge-mvp-role
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: MVPExecutionPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:*
-                  - events:PutEvents
-                Resource: "*"
 
   StepFunctionRole:
     Type: AWS::IAM::Role
@@ -111,3 +111,14 @@ Resources:
               }
             }
           }
+
+  EventBridgeInvokeStepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: eventbridge-start-stepfunction-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Se
