@@ -35,11 +35,12 @@ Resources:
     Properties:
       FunctionName: event-validator
       Handler: index.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs16.x
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         ZipFile: |
-          export const handler = async (event) => {
+          // version: v1 - validator
+          exports.handler = async (event) => {
             event.detail.modified = true;
             event.detail.timestamp = new Date().toISOString();
             return event;
@@ -50,25 +51,23 @@ Resources:
     Properties:
       FunctionName: put-back-eventbridge
       Handler: index.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs16.x
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         ZipFile: |
-          import { EventBridgeClient, PutEventsCommand } from "@aws-sdk/client-eventbridge";
-
-          const client = new EventBridgeClient({});
-
-          export const handler = async (event) => {
-            const command = new PutEventsCommand({
+          // version: v1 - sdk v2, works in Node.js 16.x
+          const AWS = require('aws-sdk');
+          const eb = new AWS.EventBridge();
+          exports.handler = async (event) => {
+            await eb.putEvents({
               Entries: [{
                 Source: "modified.message",
                 DetailType: "modified",
                 Detail: JSON.stringify(event.detail),
                 EventBusName: "event-bus"
               }]
-            });
-            await client.send(command);
-            return { status: "sent" };
+            }).promise();
+            return { status: 'sent' };
           };
 
   StepFunctionRole:
