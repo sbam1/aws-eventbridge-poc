@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EventBridge + Step Function + Lambda + API Trigger POC
+
+Resources:
+
+  ### 1. EventBridge Bus
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: event-bus
+
+  ### 2. Lambda for Validation
+  EventValidatorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: event-validator
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs18.x
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log("Original Event:", event);
+            event.detail.modified = true;
+            event.detail.timestamp = new Date().toISOString();
+            return event;
+          };
+
+  ### 3. Lambda to Put Event Back
+  PutBackToEventBridgeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: put-back-eventbridge
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs18.x
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const eb = new AWS.EventBridge();
+          exports.handler = async (event) => {
+            console.log("Putting back modified event:", event);
+            await eb.putEvents({
+              Entries: [{
+                Source: "modified.message",
+                DetailType: "modified",
+                Detail: JSON.stringify(event.detail),
+                EventBusName: "event-bus"
+              }]
+            }).promise();
+            return { status: 'Event Sent Back' };
+          };
+
+  ### 4. IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lambda-eventbridge-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - events:PutEvents
+                Resource: "*"
+
+  ### 5. Step Function Definition
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: notification-processor
+      RoleArn: !GetAtt StepFunctionRole.Arn
+      DefinitionString:
+        !Sub |
+          {
+            "Comment": "Process and re-send message",
+            "StartAt": "ValidateEvent",
+            "States": {
+              "ValidateEvent": {
+                "Type": "Task",
+                "Resource": "${EventValidatorFunction.Arn}",
+                "Next": "PutBackToEventBridge"
+              },
+              "PutBackToEventBridge": {
+                "Type": "Task",
+                "Resource": "${PutBackToEventBridgeFunction.Arn}",
+                "End": true
+              }
+            }
+          }
+
+  ### 6. Step Function Role
+  StepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: stepfunction-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+
+  ### 7. EventBridge Rule to Trigger API
+  ApiCallRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: event-to-api
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - "modified.message"
+      Targets:
+        - Id: ApiTarget
+          Arn: !Ref ApiDestinationArn  # You will need to manually create this
+          RoleArn: !GetAtt EventBridgeInvokeRole.Arn
+
+  ### 8. IAM Role for EventBridge to invoke API
+  EventBridgeInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: eventbridge-api-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: execute-api:Invoke
+                Resource: "*"
+
+Parameters:
+  ApiDestinationArn:
+    Type: String
+    Description: Enter the ARN of an existing EventBridge API Destination
+
