@@ -121,4 +121,30 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Se
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole  # ✅ this was missing before
+      Policies:
+        - PolicyName: StartStepFunctionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt StateMachine.Arn
+
+  EventRuleTriggerStepFunction:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: trigger-step-function
+      Description: Trigger Step Function from EventBridge
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - "manual.test"
+        detail-type:
+          - "initiate"
+      Targets:
+        - Arn: !GetAtt StateMachine.Arn
+          Id: "StartStepFunction"
+          RoleArn: !GetAtt EventBridgeInvokeStepFunctionRole.Arn
