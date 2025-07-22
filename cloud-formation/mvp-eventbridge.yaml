@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MVP - EventBridge to Step Function with Lambda processing and event reinjection
+
+Resources:
+
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: event-bus
+
+  EventValidatorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: event-validator
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            event.detail.modified = true;
+            event.detail.timestamp = new Date().toISOString();
+            return event;
+          };
+
+  PutBackToEventBridgeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: put-back-eventbridge
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const eb = new AWS.EventBridge();
+          exports.handler = async (event) => {
+            await eb.putEvents({
+              Entries: [{
+                Source: "modified.message",
+                DetailType: "modified",
+                Detail: JSON.stringify(event.detail),
+                EventBusName: "event-bus"
+              }]
+            }).promise();
+            return { status: 'sent' };
+          };
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lambda-eventbridge-mvp-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MVPExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                  - events:PutEvents
+                Resource: "*"
+
+  StepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: stepfunction-mvp-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionMVPPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: mvp-notification-processor
+      RoleArn: !GetAtt StepFunctionRole.Arn
+      DefinitionString:
+        !Sub |
+          {
+            "StartAt": "ValidateEvent",
+            "States": {
+              "ValidateEvent": {
+                "Type": "Task",
+                "Resource": "${EventValidatorFunction.Arn}",
+                "Next": "PutBackEvent"
+              },
+              "PutBackEvent": {
+                "Type": "Task",
+                "Resource": "${PutBackToEventBridgeFunction.Arn}",
+                "End": true
+              }
+            }
+          }
