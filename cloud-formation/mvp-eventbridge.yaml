@@ -39,11 +39,19 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         ZipFile: |
-          // version: v1 - validator
+          // version: v2 - simulating jsonNate-like transformation
           exports.handler = async (event) => {
-            event.detail.modified = true;
-            event.detail.timestamp = new Date().toISOString();
-            return event;
+            const detail = event.detail || {};
+            const transformed = {
+              ...detail,
+              enriched: true,
+              uppercasedMessage: (detail.message || "").toUpperCase(),
+              timestamp: new Date().toISOString()
+            };
+            return {
+              ...event,
+              detail: transformed
+            };
           };
 
   PutBackToEventBridgeFunction:
@@ -55,7 +63,7 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         ZipFile: |
-          // version: v1 - sdk v2, works in Node.js 16.x
+          // version: v1 - SDK v2, compatible with Node.js 16
           const AWS = require('aws-sdk');
           const eb = new AWS.EventBridge();
           exports.handler = async (event) => {
