@@ -24,6 +24,6 @@ jobs:
       - name: Deploy CloudFormation Template
         run: |
           aws cloudformation deploy \
-            --template-file cloudformation/mvp-eventbridge.yaml \
+            --template-file cloud-formation/mvp-eventbridge.yaml \
             --stack-name eventbridge-mvp-stack \
             --capabilities CAPABILITY_NAMED_IAM
