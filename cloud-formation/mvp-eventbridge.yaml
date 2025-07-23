@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: MVP - EventBridge to Step Function with Lambda processing and event reinjection
+Description: MVP - EventBridge, Step Function, API Gateway
 
 Resources:
 
@@ -158,3 +158,80 @@ Resources:
         - Arn: !GetAtt StateMachine.Arn
           Id: "StartStepFunction"
           RoleArn: !GetAtt EventBridgeInvokeStepFunctionRole.Arn
+
+  ApiGatewayPutEventFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: api-put-eventbridge
+      Runtime: nodejs16.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          // version: v1 - API Gateway handler to forward to EventBridge
+          const AWS = require('aws-sdk');
+          const eb = new AWS.EventBridge();
+          exports.handler = async (event) => {
+            const body = JSON.parse(event.body || '{}');
+            await eb.putEvents({
+              Entries: [{
+                Source: "manual.test",
+                DetailType: "initiate",
+                Detail: JSON.stringify(body),
+                EventBusName: "event-bus"
+              }]
+            }).promise();
+            return {
+              statusCode: 200,
+              body: JSON.stringify({ message: 'Event sent to EventBridge' })
+            };
+          };
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: eventbridge-mvp-api
+      EndpointConfiguration:
+        Types: [REGIONAL]
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: submit
+
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiGatewayPutEventFunction.Arn}/invocations
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiGatewayMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: prod
+
+  LambdaApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiGatewayPutEventFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/submit
+
+Outputs:
+  ApiUrl:
+    Description: "POST endpoint to trigger the EventBridge pipeline"
+    Value:
+      Fn::Sub: https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/submit
